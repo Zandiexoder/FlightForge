@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 import os
 import psutil
 import platform
+import random
 
 app = Flask(__name__)
 
@@ -936,9 +937,46 @@ def trigger_turn():
             'message': str(e)
         }), 500
 
+# Mapping of airline names to country codes
+AIRLINE_COUNTRY_MAP = {
+    'Aeroflot': 'RU',
+    'Aeromexico': 'MX',
+    'Aeroméxico': 'MX',
+    'Air Canada': 'CA',
+    'Air China': 'CN',
+    'Air France': 'FR',
+    'Air India': 'IN',
+    'American Airlines': 'US',
+    'American Supersonic': 'US',
+    'Capital Airways': 'US',
+    'Egyptair': 'EG',
+    'EuroWings': 'DE',
+    'Garuda Indonesia': 'ID',
+    'Japan Airlines': 'JP',
+    'Kiwi Air': 'NZ',
+    'LATAM Brasil': 'BR',
+    'MediFlight': 'US',
+    'Mineral Express': 'US',
+    'Ocean Freight': 'US',
+    'Pacific Island': 'US',
+    'Petroleum Air': 'US',
+    'Qantas': 'AU',
+    'Scandinavian Airlines': 'DK',
+    'TechConnect': 'US',
+    'Turkish Airlines': 'TR',
+    'Vietnam Airlines': 'VN',
+}
+
+def get_country_for_airline(name):
+    """Get country code for an airline based on its name"""
+    for airline_prefix, country_code in AIRLINE_COUNTRY_MAP.items():
+        if airline_prefix.lower() in name.lower():
+            return country_code
+    return None
+
 @app.route('/api/admin/reset-bots', methods=['POST'])
 def reset_bots():
-    """Reset all bot airlines - clear their routes and aircraft"""
+    """Reset all bot airlines - like bankruptcy: clear routes, aircraft, reset HQ to level 1 in home country, reset reputation"""
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     
@@ -946,8 +984,13 @@ def reset_bots():
         # Ensure we're not in a transaction
         conn.autocommit = False
         
-        # Get all bot airline IDs (airline_type = 2 is NON_PLAYER/bot)
-        cursor.execute("SELECT id, name FROM airline WHERE airline_type = 2")
+        # Get all bot airline IDs with their country code
+        cursor.execute("""
+            SELECT a.id, a.name, ai.country_code 
+            FROM airline a
+            LEFT JOIN airline_info ai ON a.id = ai.airline
+            WHERE a.airline_type = 2
+        """)
         bots = cursor.fetchall()
         
         if not bots:
@@ -956,13 +999,32 @@ def reset_bots():
                 'message': 'No bot airlines found to reset'
             })
         
-        bot_ids = [bot['id'] for bot in bots]
         bot_names = [bot['name'] for bot in bots]
         
         routes_deleted = 0
         aircraft_deleted = 0
+        bases_deleted = 0
+        aircraft_added = 0
+        hqs_created = 0
         
-        for bot_id in bot_ids:
+        # Get current cycle for airplane construction
+        cursor.execute("SELECT MAX(cycle) as current_cycle FROM cycle")
+        cycle_result = cursor.fetchone()
+        current_cycle = cycle_result['current_cycle'] if cycle_result and cycle_result['current_cycle'] else 0
+        
+        # Get cheap airplane models (price < 40,000,000)
+        cursor.execute("SELECT id, name, price FROM airplane_model WHERE price < 40000000 ORDER BY price")
+        cheap_models = cursor.fetchall()
+        
+        for bot in bots:
+            bot_id = bot['id']
+            bot_name = bot['name']
+            country_code = bot['country_code']
+            
+            # If no country code, try to infer from name
+            if not country_code:
+                country_code = get_country_for_airline(bot_name)
+            
             # Delete link assignments first (foreign key)
             cursor.execute("DELETE FROM link_assignment WHERE link IN (SELECT id FROM link WHERE airline = %s)", (bot_id,))
             
@@ -980,14 +1042,65 @@ def reset_bots():
             cursor.execute("DELETE FROM airplane WHERE owner = %s", (bot_id,))
             aircraft_deleted += cursor.rowcount
             
-            # Reset balance to 50,000
-            cursor.execute("UPDATE airline_info SET balance = '50000' WHERE airline = %s", (bot_id,))
+            # Delete ALL bases for this airline
+            cursor.execute("DELETE FROM airline_base WHERE airline = %s", (bot_id,))
+            bases_deleted += cursor.rowcount
+            
+            # Delete airline appeal (loyalty/awareness)
+            cursor.execute("DELETE FROM airline_appeal WHERE airline = %s", (bot_id,))
+            
+            # Reset balance to 200,000, reputation to 0, and update country_code if we have one
+            if country_code:
+                cursor.execute("""
+                    UPDATE airline_info 
+                    SET balance = '200000', reputation = 0, service_quality = 50.00, country_code = %s
+                    WHERE airline = %s
+                """, (country_code, bot_id))
+            else:
+                cursor.execute("""
+                    UPDATE airline_info 
+                    SET balance = '200000', reputation = 0, service_quality = 50.00
+                    WHERE airline = %s
+                """, (bot_id,))
+            
+            # Find the largest airport in the bot's country for HQ
+            hq_airport = None
+            if country_code:
+                cursor.execute("""
+                    SELECT id FROM airport 
+                    WHERE country_code = %s 
+                    ORDER BY airport_size DESC, population DESC 
+                    LIMIT 1
+                """, (country_code,))
+                airport_result = cursor.fetchone()
+                if airport_result:
+                    hq_airport = airport_result['id']
+            
+            # Create new HQ base at scale 1
+            if hq_airport and country_code:
+                cursor.execute("""
+                    INSERT INTO airline_base (airport, airline, scale, founded_cycle, headquarter, country)
+                    VALUES (%s, %s, 1, %s, 1, %s)
+                """, (hq_airport, bot_id, current_cycle, country_code))
+                hqs_created += 1
+            
+            # Add 5 random cheap airplanes
+            if cheap_models:
+                selected_models = random.sample(cheap_models, min(5, len(cheap_models)))
+                for model in selected_models:
+                    cursor.execute("""
+                        INSERT INTO airplane (model, owner, constructed_cycle, purchased_cycle, 
+                                             airplane_condition, depreciation_rate, value, is_sold, 
+                                             dealer_ratio, home, purchase_rate, version)
+                        VALUES (%s, %s, %s, %s, 100.0, 0, %s, 0, 1.0, %s, 1.0, 0)
+                    """, (model['id'], bot_id, current_cycle, current_cycle, model['price'], hq_airport))
+                    aircraft_added += 1
         
         conn.commit()
         
         return jsonify({
             'success': True,
-            'message': f'Reset {len(bots)} bot airlines. Deleted {routes_deleted} routes and {aircraft_deleted} aircraft. Balance reset to $50,000.',
+            'message': f'Reset {len(bots)} bot airlines. Deleted {routes_deleted} routes, {aircraft_deleted} aircraft, {bases_deleted} bases. Created {hqs_created} HQs. Added {aircraft_added} new aircraft. Balance reset to $200,000, reputation to 0.',
             'bots_reset': bot_names
         })
         
@@ -1006,15 +1119,20 @@ def reset_bots():
 
 @app.route('/api/admin/reset-bot/<int:bot_id>', methods=['POST'])
 def reset_single_bot(bot_id):
-    """Reset a specific bot airline"""
+    """Reset a specific bot airline - like bankruptcy"""
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     
     try:
         conn.autocommit = False
         
-        # Verify it's a bot airline
-        cursor.execute("SELECT id, name, airline_type FROM airline WHERE id = %s", (bot_id,))
+        # Verify it's a bot airline and get country code
+        cursor.execute("""
+            SELECT a.id, a.name, a.airline_type, ai.country_code 
+            FROM airline a
+            LEFT JOIN airline_info ai ON a.id = ai.airline
+            WHERE a.id = %s
+        """, (bot_id,))
         bot = cursor.fetchone()
         
         if not bot:
@@ -1028,6 +1146,22 @@ def reset_single_bot(bot_id):
                 'success': False,
                 'message': f'Airline {bot["name"]} is not a bot airline'
             }), 400
+        
+        country_code = bot['country_code']
+        bot_name = bot['name']
+        
+        # If no country code, try to infer from name
+        if not country_code:
+            country_code = get_country_for_airline(bot_name)
+        
+        # Get current cycle for airplane construction
+        cursor.execute("SELECT MAX(cycle) as current_cycle FROM cycle")
+        cycle_result = cursor.fetchone()
+        current_cycle = cycle_result['current_cycle'] if cycle_result and cycle_result['current_cycle'] else 0
+        
+        # Get cheap airplane models (price < 40,000,000)
+        cursor.execute("SELECT id, name, price FROM airplane_model WHERE price < 40000000 ORDER BY price")
+        cheap_models = cursor.fetchall()
         
         # Delete link assignments first (foreign key)
         cursor.execute("DELETE FROM link_assignment WHERE link IN (SELECT id FROM link WHERE airline = %s)", (bot_id,))
@@ -1046,14 +1180,161 @@ def reset_single_bot(bot_id):
         cursor.execute("DELETE FROM airplane WHERE owner = %s", (bot_id,))
         aircraft_deleted = cursor.rowcount
         
-        # Reset balance to 50,000
-        cursor.execute("UPDATE airline_info SET balance = '50000' WHERE airline = %s", (bot_id,))
+        # Delete ALL bases
+        cursor.execute("DELETE FROM airline_base WHERE airline = %s", (bot_id,))
+        bases_deleted = cursor.rowcount
+        
+        # Delete airline appeal (loyalty/awareness)
+        cursor.execute("DELETE FROM airline_appeal WHERE airline = %s", (bot_id,))
+        
+        # Reset balance to 200,000, reputation to 0, and update country_code if we have one
+        if country_code:
+            cursor.execute("""
+                UPDATE airline_info 
+                SET balance = '200000', reputation = 0, service_quality = 50.00, country_code = %s
+                WHERE airline = %s
+            """, (country_code, bot_id))
+        else:
+            cursor.execute("""
+                UPDATE airline_info 
+                SET balance = '200000', reputation = 0, service_quality = 50.00
+                WHERE airline = %s
+            """, (bot_id,))
+        
+        # Find the largest airport in the bot's country for HQ
+        hq_airport = None
+        if country_code:
+            cursor.execute("""
+                SELECT id FROM airport 
+                WHERE country_code = %s 
+                ORDER BY airport_size DESC, population DESC 
+                LIMIT 1
+            """, (country_code,))
+            airport_result = cursor.fetchone()
+            if airport_result:
+                hq_airport = airport_result['id']
+        
+        # Create new HQ base at scale 1
+        if hq_airport and country_code:
+            cursor.execute("""
+                INSERT INTO airline_base (airport, airline, scale, founded_cycle, headquarter, country)
+                VALUES (%s, %s, 1, %s, 1, %s)
+            """, (hq_airport, bot_id, current_cycle, country_code))
+        
+        # Add 5 random cheap airplanes
+        aircraft_added = 0
+        if cheap_models:
+            selected_models = random.sample(cheap_models, min(5, len(cheap_models)))
+            for model in selected_models:
+                cursor.execute("""
+                    INSERT INTO airplane (model, owner, constructed_cycle, purchased_cycle, 
+                                         airplane_condition, depreciation_rate, value, is_sold, 
+                                         dealer_ratio, home, purchase_rate, version)
+                    VALUES (%s, %s, %s, %s, 100.0, 0, %s, 0, 1.0, %s, 1.0, 0)
+                """, (model['id'], bot_id, current_cycle, current_cycle, model['price'], hq_airport))
+                aircraft_added += 1
         
         conn.commit()
         
         return jsonify({
             'success': True,
-            'message': f'Reset bot airline {bot["name"]}. Deleted {routes_deleted} routes and {aircraft_deleted} aircraft. Balance reset to $50,000.'
+            'message': f'Reset bot airline {bot["name"]}. Deleted {routes_deleted} routes, {aircraft_deleted} aircraft, {bases_deleted} bases. Created new HQ. Added {aircraft_added} new aircraft. Balance reset to $200,000, reputation to 0.'
+        })
+        
+    except Exception as e:
+        try:
+            conn.rollback()
+        except:
+            pass
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/admin/create-bot', methods=['POST'])
+def create_bot():
+    """Create a new bot airline"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        data = request.get_json() or {}
+        name = data.get('name', 'New Bot Airline')
+        country_code = data.get('country_code', 'US')
+        airport_iata = data.get('airport_iata')  # Optional specific airport
+        
+        conn.autocommit = False
+        
+        # Get current cycle
+        cursor.execute("SELECT MAX(cycle) as current_cycle FROM cycle")
+        cycle_result = cursor.fetchone()
+        current_cycle = cycle_result['current_cycle'] if cycle_result and cycle_result['current_cycle'] else 0
+        
+        # Find airport for HQ
+        if airport_iata:
+            cursor.execute("SELECT id, country_code FROM airport WHERE iata = %s", (airport_iata,))
+            airport_result = cursor.fetchone()
+            if airport_result:
+                hq_airport = airport_result['id']
+                country_code = airport_result['country_code']
+            else:
+                return jsonify({'success': False, 'message': f'Airport {airport_iata} not found'}), 404
+        else:
+            cursor.execute("""
+                SELECT id FROM airport 
+                WHERE country_code = %s 
+                ORDER BY airport_size DESC, population DESC 
+                LIMIT 1
+            """, (country_code,))
+            airport_result = cursor.fetchone()
+            if airport_result:
+                hq_airport = airport_result['id']
+            else:
+                return jsonify({'success': False, 'message': f'No airport found in country {country_code}'}), 404
+        
+        # Create the airline (airline_type = 2 is bot/NON_PLAYER)
+        cursor.execute("""
+            INSERT INTO airline (name, airline_type) VALUES (%s, 2)
+        """, (name,))
+        airline_id = cursor.lastrowid
+        
+        # Create airline_info
+        cursor.execute("""
+            INSERT INTO airline_info (airline, balance, service_quality, target_service_quality, reputation, country_code, initialized)
+            VALUES (%s, 200000, 50.00, 50, 0, %s, 1)
+        """, (airline_id, country_code))
+        
+        # Create HQ base
+        cursor.execute("""
+            INSERT INTO airline_base (airport, airline, scale, founded_cycle, headquarter, country)
+            VALUES (%s, %s, 1, %s, 1, %s)
+        """, (hq_airport, airline_id, current_cycle, country_code))
+        
+        # Get cheap airplane models and add 5 random ones
+        cursor.execute("SELECT id, name, price FROM airplane_model WHERE price < 40000000 ORDER BY price")
+        cheap_models = cursor.fetchall()
+        
+        aircraft_added = 0
+        if cheap_models:
+            selected_models = random.sample(cheap_models, min(5, len(cheap_models)))
+            for model in selected_models:
+                cursor.execute("""
+                    INSERT INTO airplane (model, owner, constructed_cycle, purchased_cycle, 
+                                         airplane_condition, depreciation_rate, value, is_sold, 
+                                         dealer_ratio, home, purchase_rate, version)
+                    VALUES (%s, %s, %s, %s, 100.0, 0, %s, 0, 1.0, %s, 1.0, 0)
+                """, (model['id'], airline_id, current_cycle, current_cycle, model['price'], hq_airport))
+                aircraft_added += 1
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Created bot airline "{name}" (ID: {airline_id}) with HQ in {country_code}. Added {aircraft_added} aircraft.',
+            'airline_id': airline_id
         })
         
     except Exception as e:

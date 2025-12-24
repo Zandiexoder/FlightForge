@@ -1284,19 +1284,19 @@
                     </div>
                     <div class="mini-stat">
                         <span class="mini-stat-label">Total Airplanes</span>
-                        <span class="mini-stat-value">${data.total_airplanes.toLocaleString()}</span>
+                        <span class="mini-stat-value">${parseInt(data.total_airplanes || 0).toLocaleString()}</span>
                     </div>
                     <div class="mini-stat">
                         <span class="mini-stat-label">Database Size</span>
-                        <span class="mini-stat-value">${data.database_size_mb.toFixed(2)} MB</span>
+                        <span class="mini-stat-value">${parseFloat(data.database_size_mb || 0).toFixed(2)} MB</span>
                     </div>
                     <div class="mini-stat">
                         <span class="mini-stat-label">Current Cycle</span>
-                        <span class="mini-stat-value">${data.current_cycle.toLocaleString()}</span>
+                        <span class="mini-stat-value">${parseInt(data.current_cycle || 0).toLocaleString()}</span>
                     </div>
                     <div class="mini-stat">
                         <span class="mini-stat-label">Last Cycle Passengers</span>
-                        <span class="mini-stat-value">${data.last_cycle_passengers.toLocaleString()}</span>
+                        <span class="mini-stat-value">${parseInt(data.last_cycle_passengers || 0).toLocaleString()}</span>
                     </div>
                 `;
                 container.innerHTML = html;
