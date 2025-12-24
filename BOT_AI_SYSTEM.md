@@ -1,7 +1,54 @@
 # Bot AI Enhancement - Making Bots Feel Alive!
 
 ## Overview
-This enhancement transforms bot airlines from static entities into intelligent, dynamic competitors that behave like real players, making single-player gameplay engaging and challenging.
+This document describes the AI system that makes bot airlines behave realistically. Bot airlines now make intelligent, autonomous decisions about routes, pricing, and competition based on actual market conditions.
+
+## ⭐ Phase 3: Demand-Based Intelligence (Current)
+
+The AI system now makes decisions based on **actual demand data** and **dynamic market conditions**:
+
+### Key Features
+
+#### 1. **Demand-Based Route Selection**
+- Routes are chosen based on **actual passenger demand** between airports
+- Uses `DemandGenerator.computeBaseDemandBetweenAirports()` for real demand calculation
+- Considers affinity, distance, population, and economic factors
+- Scores routes by: `demand × competition_factor × personality_fit`
+- Monopoly routes get 1.5x bonus, duopolies 1.0x, competitive markets 0.4x
+
+#### 2. **Dynamic Pricing System**
+- Prices are set based on:
+  - **Competition level**: Monopoly → premium pricing, competitive → lower prices
+  - **Estimated demand**: High demand → higher prices, low demand → discounts
+  - **Competitor prices**: Analyzes competitor links and adjusts accordingly
+  - **Personality**: Budget carriers always undercut, Premium charges more
+- Prices bounded between 50% and 180% of standard fares
+
+#### 3. **Continuous Price Optimization**
+- 35% chance per cycle to review and adjust prices
+- Monitors load factors on each route
+- Raises prices when load factor > 95%
+- Lowers prices when load factor < target
+- Considers competitor pricing relative to own prices
+
+#### 4. **Competitive Response System**
+- 30% chance per cycle to analyze and respond to competition
+- Different responses by personality:
+  - **AGGRESSIVE**: Undercuts competitor prices by 5%
+  - **BUDGET**: Always tries to be the cheapest (up to 10% below lowest competitor)
+  - **PREMIUM**: Ignores budget competitors, focuses on quality
+  - **CONSERVATIVE**: Makes moderate adjustments, prioritizes stability
+  - **REGIONAL**: Avoids head-on competition, seeks niches
+  - **BALANCED**: Tactical responses based on market position
+
+#### 5. **Route Abandonment**
+- 15% chance per cycle to evaluate route profitability
+- Abandons routes after 4 consecutive unprofitable cycles
+- Also abandons routes with <30% average load factor
+- Personality affects abandonment threshold:
+  - Aggressive: Very reluctant (needs <20% LF to abandon)
+  - Conservative: Quick to cut losses (<40% LF threshold)
+  - Budget: Needs good utilization (<35% LF threshold)
 
 ## Features Implemented
 
@@ -211,18 +258,34 @@ Airline Type LUXURY → PREMIUM
 
 ## Configuration
 
-### Tuning Probabilities:
+### Tuning Probabilities (Phase 3):
 ```scala
-val ROUTE_PLANNING_PROBABILITY = 0.15        // 15% chance
-val AIRPLANE_PURCHASE_PROBABILITY = 0.20     // 20% chance
-val ROUTE_OPTIMIZATION_PROBABILITY = 0.10    // 10% chance
-val COMPETITION_RESPONSE_PROBABILITY = 0.25  // 25% chance
+val ROUTE_PLANNING_PROBABILITY = 0.20        // 20% chance - plan new demand-based routes
+val AIRPLANE_PURCHASE_PROBABILITY = 0.20     // 20% chance - buy new aircraft
+val ROUTE_OPTIMIZATION_PROBABILITY = 0.35    // 35% chance - optimize prices dynamically
+val COMPETITION_RESPONSE_PROBABILITY = 0.30  // 30% chance - respond to competitors
+val ROUTE_ABANDONMENT_PROBABILITY = 0.15     // 15% chance - evaluate unprofitable routes
 ```
 
 Adjust these values in `BotAISimulation.scala` to control bot activity levels.
 
-### Personality Tuning:
-Each personality has configurable parameters:
+### Pricing Constants:
+```scala
+val MIN_PRICE_MULTIPLIER = 0.50  // Never go below 50% of standard price
+val MAX_PRICE_MULTIPLIER = 1.80  // Never go above 180% of standard price
+val PRICE_ADJUSTMENT_STEP = 0.05 // 5% price adjustment per cycle
+```
+
+### Personality Price Multipliers:
+Each personality has a base price multiplier:
+- **AGGRESSIVE**: 0.92 (8% below market)
+- **BUDGET**: 0.72 (28% below market - deep discounts!)
+- **BALANCED**: 1.0 (market rate)
+- **REGIONAL**: 0.95 (5% below market)
+- **CONSERVATIVE**: 1.12 (12% above market)
+- **PREMIUM**: 1.35 (35% above market)
+
+### Additional Personality Parameters:
 - `minAirportSize` - Minimum airport size to consider
 - `minPopulation` - Minimum population requirement
 - `targetCapacityLow/High` - Ideal capacity utilization range
@@ -231,30 +294,31 @@ Each personality has configurable parameters:
 ## Testing
 
 ### Verify Bot Activity:
-1. Check simulation logs for "[Bot AI Simulation]" messages
-2. Monitor bot airline route expansions
-3. Observe competition responses on shared routes
-4. Check fleet purchases over multiple cycles
+1. Check simulation logs for "[Bot AI Simulation - Phase 3]" messages
+2. Look for "📊 Demand:" logs showing demand-based route selection
+3. Watch for "📈 RAISED" / "📉 LOWERED" price adjustment messages
+4. Monitor competitive responses (⚔️ AGGRESSIVE, 💸 BUDGET, etc.)
+5. Check for "❌ ABANDONED" routes being cut
 
 ### Expected Behavior:
-- Bots should expand ~15% of cycles
-- New routes should appear from bot airlines
-- Competition should intensify on profitable routes
-- Bot fleet sizes should grow over time
+- Bots select routes based on ACTUAL demand between airports
+- Prices adjust dynamically based on load factor (35% of cycles)
+- Competition triggers price wars (30% of cycles)
+- Unprofitable routes get abandoned after 4 cycles
+- Different personalities create diverse market behaviors
 
 ## Summary
 
 This system transforms bot airlines from passive entities into intelligent, personality-driven competitors that:
-- ✅ Make autonomous decisions every cycle
-- ✅ Have distinct strategies and behaviors
-- ✅ Respond to market conditions and competition
-- ✅ Create dynamic, engaging single-player experience
-- ✅ Require no visual changes - bots act like real players
-
-The foundation is now in place for continuous enhancement and refinement based on gameplay feedback!
+- ✅ Select routes based on **actual passenger demand**
+- ✅ Set prices dynamically based on **competition and demand**
+- ✅ Adjust prices continuously as market conditions change
+- ✅ Respond strategically to competitor pricing
+- ✅ Abandon unprofitable routes
+- ✅ Create dynamic, realistic airline competition
 
 ---
 
-**Status**: Phase 1 Complete - Framework implemented, ready for Phase 2 (actual decision execution)
-**Impact**: Makes single-player mode significantly more challenging and engaging
-**Next Steps**: Implement actual route creation and aircraft purchase logic
+**Status**: Phase 3 Complete - Full demand-based intelligence with dynamic pricing
+**Impact**: Bots now compete realistically, making gameplay challenging and engaging
+**Features**: Demand-based routes, dynamic pricing, competition response, route abandonment

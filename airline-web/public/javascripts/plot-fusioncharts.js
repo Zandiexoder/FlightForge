@@ -1,7 +1,19 @@
+// Safe dispose helper function to handle FusionCharts cleanup
+function safeDisposeFusionCharts(container) {
+    container.children().each(function(i) {
+        var el = $(this)[0];
+        if (el && typeof el.dispose === 'function') {
+            try {
+                el.dispose();
+            } catch (e) {
+                // Ignore dispose errors
+            }
+        }
+    });
+}
+
 function plotMaintenanceLevelGauge(container, maintenanceLevelInput, onchangeFunction) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	var dataSource = { 
 			"chart": {
@@ -75,9 +87,7 @@ function plotMaintenanceLevelGauge(container, maintenanceLevelInput, onchangeFun
 
 //unmodifiable seat configuration bar
 function plotSeatConfigurationBar(container, configuration, maxSeats, spaceMultipliers, hideValues, height) {
-    container.children(':FusionCharts').each((function(i) {
-          $(this)[0].dispose();
-    }))
+    safeDisposeFusionCharts(container);
     container.empty()
 
     var dataSource = {
@@ -154,9 +164,7 @@ function plotSeatConfigurationBar(container, configuration, maxSeats, spaceMulti
 }
 
 function plotSeatConfigurationGauge(container, configuration, maxSeats, spaceMultipliers, callback) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	container.empty()
 
@@ -293,9 +301,7 @@ function plotSeatConfigurationGauge(container, configuration, maxSeats, spaceMul
 }
 
 function plotAirportShares(airportShares, currentAirportId, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	var data = []
 	$.each(airportShares, function(key, airportShare) {
@@ -346,9 +352,7 @@ var plotUnitEnum = {
 
 
 function plotLinkProfit(linkConsumptions, container, plotUnit) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	var data = []
 	var category = []
@@ -423,17 +427,9 @@ function plotLinkProfit(linkConsumptions, container, plotUnit) {
 }
 
 function plotLinkConsumption(linkConsumptions, ridershipContainer, revenueContainer, priceContainer, plotUnit) {
-	ridershipContainer.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
-	
-	revenueContainer.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
-	
-	priceContainer.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(ridershipContainer);
+	safeDisposeFusionCharts(revenueContainer);
+	safeDisposeFusionCharts(priceContainer);
 	
 	var emptySeatsData = []
 	var cancelledSeatsData = []
@@ -644,9 +640,7 @@ function plotLinkConsumption(linkConsumptions, ridershipContainer, revenueContai
 }
 
 function plotRivalHistory(rivalHistory, container, cycleHoverFunc, chartOutFunc) {
-    container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+    safeDisposeFusionCharts(container);
 	var dataByAirlineId = {}
 	var airlineNameByAirlineId = {}
 	var emptySeatsData = []
@@ -764,9 +758,7 @@ function plotRivalHistory(rivalHistory, container, cycleHoverFunc, chartOutFunc)
 }
 
 function plotLinkEvent(linkConsumptions, linkEventContainer, cycleHoverFunc, chartOutFunc) {
-	linkEventContainer.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(linkEventContainer);
 	var emptySeatsData = []
 	var cancelledSeatsData = []
 	var soldSeatsData = {
@@ -975,9 +967,7 @@ var defaultPieColors = {
 
 
 function plotPie(dataSource, currentKey, container, keyName, valueName) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	var data = []
 
@@ -1047,9 +1037,7 @@ function plotPie(dataSource, currentKey, container, keyName, valueName) {
 }
 
 function plotIncomeChart(airlineIncomes, period, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	var data = {}
 	data["total"] = []
@@ -1111,9 +1099,7 @@ function plotIncomeChart(airlineIncomes, period, container) {
 }
 
 function plotCashFlowChart(airlineCashFlows, period, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	var data = {}
 	data["cashFlow"] = []
@@ -1162,9 +1148,7 @@ function plotCashFlowChart(airlineCashFlows, period, container) {
 }
 
 function plotTotalValueChart(airlineValue, period, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 
 	var data = {}
 	data["totalValue"] = []
@@ -1213,9 +1197,7 @@ function plotTotalValueChart(airlineValue, period, container) {
 }
 
 function plotOpsChart(stats, container) {
-	container.children(':FusionCharts').each(function () {
-		$(this)[0].dispose();
-	});
+	safeDisposeFusionCharts(container);
 
 	const data = {
 		RASK: [],
@@ -1274,9 +1256,7 @@ function plotOpsChart(stats, container) {
 }
 
 function plotAirlineStats(stats, container) {
-    container.children(':FusionCharts').each(function () {
-        $(this)[0].dispose();
-    });
+    safeDisposeFusionCharts(container);
 
     const data = {
         total: [],
@@ -1335,9 +1315,7 @@ function plotAirlineStats(stats, container) {
 }
 
 function plotOilPriceChart(oilPrices, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 	
 	var data = []
 	var category = []
@@ -1402,9 +1380,7 @@ function plotOilPriceChart(oilPrices, container) {
 
 
 function plotLoanInterestRatesChart(rates, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 
 	var data = []
 	var category = []
@@ -1470,9 +1446,7 @@ function plotLoanInterestRatesChart(rates, container) {
 }
 
 function plotRivalHistoryChart(allRivalLinkConsumptions, priceContainer, linkClass, field, numberPrefix, currentAirlineId) {
-	priceContainer.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(priceContainer);
 
 	var priceByAirline = {}
 
@@ -1572,9 +1546,7 @@ function plotRivalHistoryChart(allRivalLinkConsumptions, priceContainer, linkCla
 }
 
 function plotLoyalistHistoryChart(loyalistHistory, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 
     if (jQuery.isEmptyObject(loyalistHistory)) {
         return
@@ -1654,9 +1626,7 @@ function plotLoyalistHistoryChart(loyalistHistory, container) {
 }
 
 function plotMissionStatsGraph(stats, threshold, container) {
-	container.children(':FusionCharts').each((function(i) {
-		  $(this)[0].dispose();
-	}))
+	safeDisposeFusionCharts(container);
 
 	var data = []
 	var category = []

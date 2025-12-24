@@ -382,8 +382,13 @@ def get_database_stats():
         cursor.execute("SELECT COUNT(*) as count FROM airline")
         stats['total_airlines'] = cursor.fetchone()['count']
         
-        # Active airlines (with balance > 0)
-        cursor.execute("SELECT COUNT(*) as count FROM airline WHERE balance > 0")
+        # Active airlines (with balance > 0) - balance is in airline_info table
+        cursor.execute("""
+            SELECT COUNT(*) as count 
+            FROM airline a
+            JOIN airline_info ai ON a.id = ai.airline
+            WHERE CAST(ai.balance AS SIGNED) > 0
+        """)
         stats['active_airlines'] = cursor.fetchone()['count']
         
         # Bot airlines
@@ -417,18 +422,18 @@ def get_database_stats():
         stats['database_size_mb'] = result['size_mb'] if result['size_mb'] else 0
         
         # Current game cycle
-        cursor.execute("SELECT cycle FROM cycle ORDER BY id DESC LIMIT 1")
+        cursor.execute("SELECT cycle FROM cycle LIMIT 1")
         cycle_result = cursor.fetchone()
         stats['current_cycle'] = cycle_result['cycle'] if cycle_result else 0
         
-        # Total passenger count (last cycle)
+        # Total passenger count (last cycle) - sum sold seats
         cursor.execute("""
-            SELECT SUM(passenger_count) as total 
+            SELECT SUM(sold_seats_economy + sold_seats_business + sold_seats_first) as total 
             FROM link_consumption 
             WHERE cycle = (SELECT MAX(cycle) FROM link_consumption)
         """)
         passenger_result = cursor.fetchone()
-        stats['last_cycle_passengers'] = passenger_result['total'] if passenger_result['total'] else 0
+        stats['last_cycle_passengers'] = passenger_result['total'] if passenger_result and passenger_result['total'] else 0
         
         return jsonify(stats)
     except Exception as e:
@@ -464,17 +469,16 @@ def get_game_activity():
         """)
         top_airlines = cursor.fetchall()
         
-        # Busiest routes (last cycle)
+        # Busiest routes (last cycle) - sum sold seats as passenger count
         cursor.execute("""
             SELECT 
-                l.from_airport,
-                l.to_airport,
-                lc.passenger_count,
+                lc.from_airport,
+                lc.to_airport,
+                (lc.sold_seats_economy + lc.sold_seats_business + lc.sold_seats_first) as passenger_count,
                 lc.cycle
             FROM link_consumption lc
-            JOIN link l ON lc.link = l.id
             WHERE lc.cycle = (SELECT MAX(cycle) FROM link_consumption)
-            ORDER BY lc.passenger_count DESC
+            ORDER BY (lc.sold_seats_economy + lc.sold_seats_business + lc.sold_seats_first) DESC
             LIMIT 10
         """)
         busiest_routes = cursor.fetchall()
@@ -492,7 +496,7 @@ def get_game_activity():
 
 @app.route('/api/containers')
 def get_containers():
-    """Get Docker container status"""
+    """Get Docker container status - returns empty if docker not available"""
     try:
         import subprocess
         import json
@@ -506,7 +510,8 @@ def get_containers():
         )
         
         if result.returncode != 0:
-            return jsonify({'error': 'Docker not available or no permissions'}), 500
+            # Return empty list instead of error - docker not available in container
+            return jsonify({'containers': [], 'message': 'Docker not available in this environment'})
         
         containers = []
         for line in result.stdout.strip().split('\n'):
@@ -525,11 +530,11 @@ def get_containers():
         
         return jsonify({'containers': containers})
     except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Docker command timeout'}), 500
+        return jsonify({'containers': [], 'message': 'Docker command timeout'})
     except FileNotFoundError:
-        return jsonify({'error': 'Docker not installed'}), 500
+        return jsonify({'containers': [], 'message': 'Docker not installed in this environment'})
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'containers': [], 'message': str(e)})
 
 @app.route('/api/logs/recent')
 def get_recent_logs():
@@ -548,18 +553,14 @@ def get_recent_logs():
         if cursor.fetchone()['count'] == 0:
             return jsonify({'logs': [], 'message': 'Log table not found'})
         
-        # Get recent logs
+        # Get recent logs - use cycle instead of log_time (which doesn't exist)
         cursor.execute("""
-            SELECT id, airline, category, log_time, message
+            SELECT id, airline, category, severity, cycle, message
             FROM log
             ORDER BY id DESC
             LIMIT 50
         """)
         logs = cursor.fetchall()
-        
-        for log in logs:
-            if log['log_time']:
-                log['log_time'] = log['log_time'].isoformat()
         
         return jsonify({'logs': logs})
     except Exception as e:
@@ -738,17 +739,27 @@ def get_bots():
 
 def determine_personality(balance, reputation, service_quality):
     """Determine bot personality based on stats (mirrors BotAISimulation.scala logic)"""
+    # Convert to float to handle potential string values from database
+    try:
+        balance = float(balance) if balance else 0
+        reputation = float(reputation) if reputation else 0
+        service_quality = float(service_quality) if service_quality else 0
+    except (ValueError, TypeError):
+        balance = 0
+        reputation = 0
+        service_quality = 0
+    
     cash_ratio = balance / 10000000.0  # Normalize to 10M
     
-    if service_quality and service_quality > 70:
+    if service_quality > 70:
         return "PREMIUM"
-    elif cash_ratio < 2 and reputation and reputation < 30:
+    elif cash_ratio < 2 and reputation < 30:
         return "BUDGET"
-    elif reputation and reputation > 70:
+    elif reputation > 70:
         return "CONSERVATIVE"
     elif cash_ratio > 10:
         return "AGGRESSIVE"
-    elif service_quality and service_quality < 40:
+    elif service_quality < 40:
         return "REGIONAL"
     else:
         return "BALANCED"
@@ -897,6 +908,182 @@ def get_bots_summary():
             'total_routes': total_routes,
             'total_aircraft': total_aircraft,
             'personality_distribution': personality_counts
+        })
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/admin/trigger-turn', methods=['POST'])
+def trigger_turn():
+    """Trigger an immediate turn/cycle by creating a trigger file in the shared volume"""
+    try:
+        # Create trigger directory if it doesn't exist
+        trigger_dir = '/tmp/admin-triggers'
+        os.makedirs(trigger_dir, exist_ok=True)
+        
+        # Create the trigger file
+        trigger_file = os.path.join(trigger_dir, 'trigger_turn')
+        with open(trigger_file, 'w') as f:
+            f.write(f'trigger_requested_at={datetime.now().isoformat()}')
+        
+        return jsonify({
+            'success': True,
+            'message': 'Turn trigger signal sent! The simulation will start the next cycle within a few seconds.'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+@app.route('/api/admin/reset-bots', methods=['POST'])
+def reset_bots():
+    """Reset all bot airlines - clear their routes and aircraft"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # Ensure we're not in a transaction
+        conn.autocommit = False
+        
+        # Get all bot airline IDs (airline_type = 2 is NON_PLAYER/bot)
+        cursor.execute("SELECT id, name FROM airline WHERE airline_type = 2")
+        bots = cursor.fetchall()
+        
+        if not bots:
+            return jsonify({
+                'success': True,
+                'message': 'No bot airlines found to reset'
+            })
+        
+        bot_ids = [bot['id'] for bot in bots]
+        bot_names = [bot['name'] for bot in bots]
+        
+        routes_deleted = 0
+        aircraft_deleted = 0
+        
+        for bot_id in bot_ids:
+            # Delete link assignments first (foreign key)
+            cursor.execute("DELETE FROM link_assignment WHERE link IN (SELECT id FROM link WHERE airline = %s)", (bot_id,))
+            
+            # Delete link consumptions
+            cursor.execute("DELETE FROM link_consumption WHERE link IN (SELECT id FROM link WHERE airline = %s)", (bot_id,))
+            
+            # Delete links (routes)
+            cursor.execute("DELETE FROM link WHERE airline = %s", (bot_id,))
+            routes_deleted += cursor.rowcount
+            
+            # Delete airplane configurations
+            cursor.execute("DELETE FROM airplane_configuration WHERE airplane IN (SELECT id FROM airplane WHERE owner = %s)", (bot_id,))
+            
+            # Delete airplanes
+            cursor.execute("DELETE FROM airplane WHERE owner = %s", (bot_id,))
+            aircraft_deleted += cursor.rowcount
+            
+            # Reset balance to 50,000
+            cursor.execute("UPDATE airline_info SET balance = '50000' WHERE airline = %s", (bot_id,))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Reset {len(bots)} bot airlines. Deleted {routes_deleted} routes and {aircraft_deleted} aircraft. Balance reset to $50,000.',
+            'bots_reset': bot_names
+        })
+        
+    except Exception as e:
+        try:
+            conn.rollback()
+        except:
+            pass
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/admin/reset-bot/<int:bot_id>', methods=['POST'])
+def reset_single_bot(bot_id):
+    """Reset a specific bot airline"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        conn.autocommit = False
+        
+        # Verify it's a bot airline
+        cursor.execute("SELECT id, name, airline_type FROM airline WHERE id = %s", (bot_id,))
+        bot = cursor.fetchone()
+        
+        if not bot:
+            return jsonify({
+                'success': False,
+                'message': f'Airline with ID {bot_id} not found'
+            }), 404
+        
+        if bot['airline_type'] != 2:
+            return jsonify({
+                'success': False,
+                'message': f'Airline {bot["name"]} is not a bot airline'
+            }), 400
+        
+        # Delete link assignments first (foreign key)
+        cursor.execute("DELETE FROM link_assignment WHERE link IN (SELECT id FROM link WHERE airline = %s)", (bot_id,))
+        
+        # Delete link consumptions
+        cursor.execute("DELETE FROM link_consumption WHERE link IN (SELECT id FROM link WHERE airline = %s)", (bot_id,))
+        
+        # Delete links (routes)
+        cursor.execute("DELETE FROM link WHERE airline = %s", (bot_id,))
+        routes_deleted = cursor.rowcount
+        
+        # Delete airplane configurations
+        cursor.execute("DELETE FROM airplane_configuration WHERE airplane IN (SELECT id FROM airplane WHERE owner = %s)", (bot_id,))
+        
+        # Delete airplanes
+        cursor.execute("DELETE FROM airplane WHERE owner = %s", (bot_id,))
+        aircraft_deleted = cursor.rowcount
+        
+        # Reset balance to 50,000
+        cursor.execute("UPDATE airline_info SET balance = '50000' WHERE airline = %s", (bot_id,))
+        
+        conn.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Reset bot airline {bot["name"]}. Deleted {routes_deleted} routes and {aircraft_deleted} aircraft. Balance reset to $50,000.'
+        })
+        
+    except Exception as e:
+        try:
+            conn.rollback()
+        except:
+            pass
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+    finally:
+        cursor.close()
+        conn.close()
+
+@app.route('/api/game/cycle')
+def get_current_cycle():
+    """Get the current game cycle/turn number"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        cursor.execute("SELECT cycle FROM cycle LIMIT 1")
+        result = cursor.fetchone()
+        cycle = result['cycle'] if result else 0
+        
+        return jsonify({
+            'cycle': cycle,
+            'week': cycle % 52 + 1,
+            'year': cycle // 52 + 1
         })
     finally:
         cursor.close()

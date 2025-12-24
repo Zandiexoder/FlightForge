@@ -89,6 +89,87 @@ const LeafletGeometry = {
     }
 };
 
+/**
+ * Fix paths that cross the antimeridian (180° longitude)
+ * This ensures Leaflet draws the shorter path instead of going around the world
+ * @param {Array} latlngs - Array of [lat, lng] coordinates
+ * @returns {Array} Adjusted coordinates
+ */
+function fixAntimeridianPath(latlngs) {
+    if (!latlngs || latlngs.length < 2) {
+        return latlngs;
+    }
+    
+    var result = [[latlngs[0][0], latlngs[0][1]]];
+    var offset = 0;
+    
+    for (var i = 1; i < latlngs.length; i++) {
+        var prevLng = latlngs[i - 1][1] + offset;
+        var currLng = latlngs[i][1];
+        
+        // Calculate the difference
+        var diff = currLng - (latlngs[i - 1][1]);
+        
+        // If the difference is greater than 180°, the line crosses the antimeridian
+        // Adjust the longitude to continue in the same direction
+        if (diff > 180) {
+            offset -= 360;
+        } else if (diff < -180) {
+            offset += 360;
+        }
+        
+        result.push([latlngs[i][0], currLng + offset]);
+    }
+    
+    return result;
+}
+
+// Enhanced control array for Google Maps compatibility
+function createControlArray() {
+    var arr = [];
+    arr.getLength = function() {
+        return this.length;
+    };
+    arr.clear = function() {
+        this.splice(0, this.length);
+    };
+    arr.push = function(element) {
+        Array.prototype.push.call(this, element);
+    };
+    return arr;
+}
+
+// Add controls property to Leaflet Map prototype
+var originalMapInitialize = L.Map.prototype.initialize;
+L.Map.prototype.initialize = function(id, options) {
+    originalMapInitialize.call(this, id, options);
+    
+    // Create Google Maps compatible controls structure
+    if (!this.controls) {
+        this.controls = {};
+        // Initialize control positions with numeric keys (Google Maps style)
+        // Position values: TOP_LEFT=0, TOP_CENTER=1, TOP_RIGHT=2, LEFT_TOP=3, LEFT_CENTER=4, LEFT_BOTTOM=5,
+        //                 RIGHT_TOP=6, RIGHT_CENTER=7, RIGHT_BOTTOM=8, BOTTOM_LEFT=9, BOTTOM_CENTER=10, BOTTOM_RIGHT=11
+        for (var i = 0; i < 12; i++) {
+            this.controls[i] = createControlArray();
+        }
+        
+        // Also add string keys for convenience
+        this.controls['TOP_LEFT'] = this.controls[0];
+        this.controls['TOP_CENTER'] = this.controls[1];
+        this.controls['TOP_RIGHT'] = this.controls[2];
+        this.controls['LEFT_TOP'] = this.controls[3];
+        this.controls['LEFT_CENTER'] = this.controls[4];
+        this.controls['LEFT_BOTTOM'] = this.controls[5];
+        this.controls['RIGHT_TOP'] = this.controls[6];
+        this.controls['RIGHT_CENTER'] = this.controls[7];
+        this.controls['RIGHT_BOTTOM'] = this.controls[8];
+        this.controls['BOTTOM_LEFT'] = this.controls[9];
+        this.controls['BOTTOM_CENTER'] = this.controls[10];
+        this.controls['BOTTOM_RIGHT'] = this.controls[11];
+    }
+};
+
 // Enhanced Marker class
 L.EnhancedMarker = L.Marker.extend({
     initialize: function(latlng, options) {
@@ -285,10 +366,12 @@ L.EnhancedMap = L.Map.extend({
 
         L.Map.prototype.initialize.call(this, id, leafletOptions);
 
-        // Add default OSM tiles
+        // Add default Thunderforest Outdoors tiles
         const tileOptions = options.tileLayer || {
-            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url: 'https://{s}.tile.thunderforest.com/outdoors/{z}/{x}/{y}{r}.png?apikey={apikey}',
+            attribution: '&copy; <a href="http://www.thunderforest.com/">Thunderforest</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            apikey: '<your apikey>',
+            maxZoom: 22
         };
 
         this.baseLayer = L.tileLayer(tileOptions.url, tileOptions).addTo(this);
@@ -411,28 +494,31 @@ if (typeof google.maps === 'undefined') {
                 var latlng = [options.position.lat, options.position.lng];
                 
                 var markerOptions = {
-                    title: options.title || ''
+                    title: options.title || '',
+                    // Boost opacity slightly for better visibility (multiply by 1.2, cap at 1.0)
+                    opacity: options.opacity !== undefined ? Math.min(options.opacity * 1.3, 1.0) : 1.0
                 };
                 
                 // Handle custom icon
                 if (options.icon) {
                     if (typeof options.icon === 'string') {
+                        // For simple URL strings, use appropriate icon size for airport markers
                         markerOptions.icon = L.icon({
                             iconUrl: options.icon,
-                            iconSize: [32, 32],
-                            iconAnchor: [16, 32],
-                            popupAnchor: [0, -32]
+                            iconSize: [28, 28],
+                            iconAnchor: [14, 14],
+                            popupAnchor: [0, -14]
                         });
                     } else if (options.icon.url) {
                         markerOptions.icon = L.icon({
                             iconUrl: options.icon.url,
                             iconSize: options.icon.scaledSize ? 
                                 [options.icon.scaledSize.width, options.icon.scaledSize.height] : 
-                                [32, 32],
+                                [28, 28],
                             iconAnchor: options.icon.anchor ? 
                                 [options.icon.anchor.x, options.icon.anchor.y] : 
-                                [16, 32],
-                            popupAnchor: [0, -32]
+                                [14, 14],
+                            popupAnchor: [0, -14]
                         });
                     }
                 }
@@ -492,20 +578,20 @@ if (typeof google.maps === 'undefined') {
                     if (typeof icon === 'string') {
                         leafletIcon = L.icon({
                             iconUrl: icon,
-                            iconSize: [32, 32],
-                            iconAnchor: [16, 32],
-                            popupAnchor: [0, -32]
+                            iconSize: [28, 28],
+                            iconAnchor: [14, 14],
+                            popupAnchor: [0, -14]
                         });
                     } else if (icon && icon.url) {
                         leafletIcon = L.icon({
                             iconUrl: icon.url,
                             iconSize: icon.scaledSize ? 
                                 [icon.scaledSize.width, icon.scaledSize.height] : 
-                                [32, 32],
+                                [28, 28],
                             iconAnchor: icon.anchor ? 
                                 [icon.anchor.x, icon.anchor.y] : 
-                                [16, 32],
-                            popupAnchor: [0, -32]
+                                [14, 14],
+                            popupAnchor: [0, -14]
                         });
                     } else if (icon && icon.options && icon.options.iconUrl) {
                         // Already a Leaflet icon, use as-is
@@ -528,7 +614,23 @@ if (typeof google.maps === 'undefined') {
                     } else if (eventName === 'mouseout') {
                         leafletEvent = 'mouseout';
                     }
-                    marker.on(leafletEvent, handler);
+                    // Wrap handler to convert Leaflet event to Google Maps event format
+                    // Use closure to capture marker reference for 'this' binding
+                    var self = marker;
+                    marker.on(leafletEvent, function(e) {
+                        // Add Google Maps compatible latLng property
+                        if (e.latlng) {
+                            e.latLng = {
+                                lat: function() { return e.latlng.lat; },
+                                lng: function() { return e.latlng.lng; }
+                            };
+                            // Also add as direct properties for compatibility
+                            e.latLng.lat = e.latlng.lat;
+                            e.latLng.lng = e.latlng.lng;
+                        }
+                        // Call handler with marker as 'this' context
+                        handler.call(self, e);
+                    });
                     return marker;
                 };
                 
@@ -609,6 +711,9 @@ if (typeof google.maps === 'undefined') {
                 });
             }
             
+            // Handle antimeridian crossing - adjust coordinates so Leaflet draws the shorter path
+            latlngs = fixAntimeridianPath(latlngs);
+            
             var polylineOptions = {
                 color: options.strokeColor || '#FF0000',
                 weight: options.strokeWeight || 2,
@@ -630,6 +735,8 @@ if (typeof google.maps === 'undefined') {
                 var latlngs = path.map(function(p) {
                     return [p.lat, p.lng];
                 });
+                // Apply antimeridian fix to new path as well
+                latlngs = fixAntimeridianPath(latlngs);
                 polyline.setLatLngs(latlngs);
             };
             
@@ -667,6 +774,10 @@ if (typeof google.maps === 'undefined') {
                 return polyline;
             };
             
+            polyline.getMap = function() {
+                return polyline._map || null;
+            };
+            
             polyline.addListener = function(eventName, handler) {
                 // Map Google Maps events to Leaflet events
                 var leafletEvent = eventName;
@@ -677,7 +788,23 @@ if (typeof google.maps === 'undefined') {
                 } else if (eventName === 'mouseout') {
                     leafletEvent = 'mouseout';
                 }
-                polyline.on(leafletEvent, handler);
+                // Wrap handler to convert Leaflet event to Google Maps event format
+                // Use closure to capture polyline reference for 'this' binding
+                var self = polyline;
+                polyline.on(leafletEvent, function(e) {
+                    // Add Google Maps compatible latLng property
+                    if (e.latlng) {
+                        e.latLng = {
+                            lat: function() { return e.latlng.lat; },
+                            lng: function() { return e.latlng.lng; }
+                        };
+                        // Also add as direct properties for compatibility
+                        e.latLng.lat = e.latlng.lat;
+                        e.latLng.lng = e.latlng.lng;
+                    }
+                    // Call handler with polyline as 'this' context
+                    handler.call(self, e);
+                });
                 return polyline;
             };
             
@@ -756,12 +883,25 @@ if (typeof google.maps === 'undefined') {
                 return popup._content;
             };
             
+            popup.setPosition = function(position) {
+                if (position && position.lat !== undefined && position.lng !== undefined) {
+                    // Store the position for later use when opening
+                    popup._infoWindowPosition = [position.lat, position.lng];
+                }
+                return popup;
+            };
+            
             popup.open = function(map, marker) {
                 popup.marker = marker;
                 if (marker && marker.getLatLng) {
                     popup.setLatLng(marker.getLatLng());
+                } else if (popup._infoWindowPosition) {
+                    // Use previously set position if no marker
+                    popup.setLatLng(popup._infoWindowPosition);
                 }
-                popup.openOn(map);
+                if (popup._map !== map) {
+                    popup.openOn(map);
+                }
                 return popup;
             };
             
@@ -802,7 +942,20 @@ if (typeof google.maps === 'undefined') {
                 }
                 
                 if (instance.on) {
-                    instance.on(leafletEvent, handler);
+                    // Wrap handler to convert Leaflet event to Google Maps event format
+                    instance.on(leafletEvent, function(e) {
+                        // Add Google Maps compatible latLng property
+                        if (e && e.latlng) {
+                            e.latLng = {
+                                lat: function() { return e.latlng.lat; },
+                                lng: function() { return e.latlng.lng; }
+                            };
+                            // Also add as direct properties for compatibility
+                            e.latLng.lat = e.latlng.lat;
+                            e.latLng.lng = e.latlng.lng;
+                        }
+                        handler(e);
+                    });
                 }
             },
             
@@ -827,6 +980,24 @@ if (typeof google.maps === 'undefined') {
                         instance.off();
                     }
                 }
+            },
+            
+            clearInstanceListeners: function(instance, eventName) {
+                // Alias for clearListeners - Google Maps compatibility
+                this.clearListeners(instance, eventName);
+            },
+            
+            trigger: function(instance, eventName) {
+                // Handle special events
+                if (eventName === 'resize') {
+                    // For Leaflet maps, invalidateSize is the equivalent of resize
+                    if (instance && instance.invalidateSize) {
+                        instance.invalidateSize();
+                    }
+                } else if (instance && instance.fire) {
+                    // Fire the event on Leaflet objects
+                    instance.fire(eventName);
+                }
             }
         },
         
@@ -835,12 +1006,44 @@ if (typeof google.maps === 'undefined') {
             spherical: LeafletGeometry
         },
         
-        // ControlPosition enum
+        // ControlPosition enum (Google Maps uses numeric values)
         ControlPosition: {
-            RIGHT_BOTTOM: 'bottomright',
-            LEFT_BOTTOM: 'bottomleft',
-            TOP_RIGHT: 'topright',
-            TOP_LEFT: 'topleft'
+            TOP_LEFT: 0,
+            TOP_CENTER: 1,
+            TOP_RIGHT: 2,
+            LEFT_TOP: 3,
+            LEFT_CENTER: 4,
+            LEFT_BOTTOM: 5,
+            RIGHT_TOP: 6,
+            RIGHT_CENTER: 7,
+            RIGHT_BOTTOM: 8,
+            BOTTOM_LEFT: 9,
+            BOTTOM_CENTER: 10,
+            BOTTOM_RIGHT: 11
+        },
+        
+        // LatLng constructor
+        LatLng: function(latOrOptions, lng) {
+            // Support both LatLng(lat, lng) and LatLng({lat, lng}) formats
+            if (typeof latOrOptions === 'object' && latOrOptions !== null) {
+                this.lat = latOrOptions.lat;
+                this.lng = latOrOptions.lng;
+            } else {
+                this.lat = latOrOptions;
+                this.lng = lng;
+            }
+        },
+        
+        // Point constructor for icon anchors
+        Point: function(x, y) {
+            this.x = x;
+            this.y = y;
+        },
+        
+        // Size constructor for icon sizes
+        Size: function(width, height) {
+            this.width = width;
+            this.height = height;
         }
     };
 }

@@ -27,7 +27,10 @@ object MainSimulation extends App {
   
   def mainFlow() = {
     val actor = actorSystem.actorOf(Props[MainSimulationActor])
+    // Schedule regular cycles every CYCLE_DURATION seconds
     actorSystem.scheduler.schedule(Duration.Zero, Duration(CYCLE_DURATION, TimeUnit.SECONDS), actor, Start)
+    // Also check for manual trigger every 5 seconds
+    actorSystem.scheduler.schedule(Duration(5, TimeUnit.SECONDS), Duration(5, TimeUnit.SECONDS), actor, CheckTrigger)
     Await.result(actorSystem.whenTerminated, Duration.Inf)
   }
 
@@ -125,24 +128,39 @@ object MainSimulation extends App {
     */
   class MainSimulationActor extends Actor {
     currentWeek = CycleSource.loadCycle()
+    val triggerFile = new java.io.File("/tmp/admin-triggers/trigger_turn")
+    
     def receive = {
       case Start =>
-        status = SimulationStatus.IN_PROGRESS
-        val endTime = startCycle(currentWeek)
+        runCycle()
+        
+      case CheckTrigger =>
+        // Check if a manual trigger file exists
+        if (triggerFile.exists() && status == SimulationStatus.WAITING_CYCLE_START) {
+          println("Manual turn trigger detected! Starting cycle immediately...")
+          triggerFile.delete() // Remove the trigger file
+          runCycle()
+        }
+    }
+    
+    def runCycle(): Unit = {
+      status = SimulationStatus.IN_PROGRESS
+      val endTime = startCycle(currentWeek)
 
-        currentWeek += 1
-        CycleSource.setCycle(currentWeek)
-        status = SimulationStatus.WAITING_CYCLE_START
-        postCycle(currentWeek) //post cycle do some quick updates, no long simulation
+      currentWeek += 1
+      CycleSource.setCycle(currentWeek)
+      status = SimulationStatus.WAITING_CYCLE_START
+      postCycle(currentWeek) //post cycle do some quick updates, no long simulation
 
-        //notify the websockets via EventStream
-        println("Publish Cycle Complete message")
-        SimulationEventStream.publish(CycleCompleted(currentWeek - 1, endTime), None)
+      //notify the websockets via EventStream
+      println("Publish Cycle Complete message")
+      SimulationEventStream.publish(CycleCompleted(currentWeek - 1, endTime), None)
     }
   }
    
   
   case class Start()
+  case class CheckTrigger()
 
   var status : SimulationStatus.Value = SimulationStatus.WAITING_CYCLE_START
   object SimulationStatus extends Enumeration {
@@ -152,4 +170,3 @@ object MainSimulation extends App {
 
   
 }
-
