@@ -346,6 +346,12 @@ class MapControls {
 // Enhanced Map wrapper
 L.EnhancedMap = L.Map.extend({
     initialize: function(id, options) {
+        // Define world bounds to prevent scrolling outside the map
+        var worldBounds = L.latLngBounds(
+            L.latLng(-85, -180),  // Southwest corner
+            L.latLng(85, 180)     // Northeast corner
+        );
+        
         // Convert Google Maps options to Leaflet options
         const leafletOptions = {
             center: options.center ? [options.center.lat, options.center.lng] : [0, 0],
@@ -353,7 +359,9 @@ L.EnhancedMap = L.Map.extend({
             minZoom: options.minZoom || 2,
             maxZoom: options.maxZoom || 18,
             zoomControl: options.zoomControl !== false,
-            worldCopyJump: true
+            worldCopyJump: true,
+            maxBounds: worldBounds,
+            maxBoundsViscosity: 1.0  // Prevent any dragging outside bounds
         };
 
         if (options.restriction) {
@@ -366,12 +374,11 @@ L.EnhancedMap = L.Map.extend({
 
         L.Map.prototype.initialize.call(this, id, leafletOptions);
 
-        // Add default Thunderforest Outdoors tiles
+        // Add default OpenStreetMap tiles (no API key required)
         const tileOptions = options.tileLayer || {
-            url: 'https://{s}.tile.thunderforest.com/outdoors/{z}/{x}/{y}{r}.png?apikey={apikey}',
-            attribution: '&copy; <a href="http://www.thunderforest.com/">Thunderforest</a>, &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-            apikey: '<your apikey>',
-            maxZoom: 22
+            url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            maxZoom: 19
         };
 
         this.baseLayer = L.tileLayer(tileOptions.url, tileOptions).addTo(this);
@@ -380,13 +387,16 @@ L.EnhancedMap = L.Map.extend({
         this.tileLayers = {
             standard: this.baseLayer,
             light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                maxZoom: 19
             }),
             dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                maxZoom: 19
             }),
             satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri'
+                attribution: 'Tiles &copy; Esri',
+                maxZoom: 18
             })
         };
 
@@ -909,6 +919,14 @@ if (typeof google.maps === 'undefined') {
                 if (popup._map) {
                     // Call Leaflet's native remove method to avoid recursion
                     popup.remove();
+                }
+                return popup;
+            };
+            
+            // Google Maps compatibility: setMap(null) to close popup
+            popup.setMap = function(map) {
+                if (map === null) {
+                    popup.close();
                 }
                 return popup;
             };

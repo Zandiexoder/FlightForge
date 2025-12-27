@@ -307,9 +307,8 @@ function initMap() {
 		center: [20, 150.644],
 		zoom: 2,
 		minZoom: 2,
-		// Remove maxBounds to allow infinite horizontal scrolling
-		// maxBounds: [[85, -180], [-85, 180]],
-		// maxBoundsViscosity: 1.0,
+		maxBounds: [[-85, -Infinity], [85, Infinity]],  // Limit vertical scrolling only
+		maxBoundsViscosity: 1.0,  // Solid bounds - no elastic effect
 		zoomControl: true,
 		worldCopyJump: true,  // Allows seamless world wrapping
 		continuousWorld: false,  // IMPORTANT: Must be false for wrapping to work correctly

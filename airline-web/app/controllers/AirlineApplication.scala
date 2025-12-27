@@ -182,9 +182,25 @@ class AirlineApplication @Inject()(cc: ControllerComponents) extends AbstractCon
 
 
     val alliances = AllianceSource.loadAllAlliances().map(alliance => (alliance.id, alliance)).toMap
-    Ok(Json.toJson(airlinesByUser.toList.map {
+    
+    // Get bot airlines (NON_PLAYER type) that don't have users
+    val botAirlines = AirlineSource.loadAllAirlines(fullLoad = true)
+      .filter(_.airlineType == AirlineType.NON_PLAYER)
+      .filterNot(airline => airlinesByUser.keys.exists(_.id == airline.id))
+    
+    // Create a dummy user for bot airlines display
+    val botUser = User(userName = "AI", email = "", creationTime = Calendar.getInstance(), lastActiveTime = Calendar.getInstance(), status = UserStatus.ACTIVE, level = 0, adminStatus = None, modifiers = List.empty, id = 0)
+    
+    // Combine player airlines and bot airlines
+    val playerAirlinesJson = airlinesByUser.toList.map {
       case(airline, user) => (airline, user, userStatusMap.get(user), airline.getAllianceId().map(alliances(_)), airlineModifiers.getOrElse(airline.id, List.empty), request.user.isAdmin)
-    })).withHeaders(
+    }
+    
+    val botAirlinesJson = botAirlines.map { airline =>
+      (airline, botUser, Some(LoginStatus.ACTIVE_7_DAYS), airline.getAllianceId().map(alliances(_)), airlineModifiers.getOrElse(airline.id, List.empty), request.user.isAdmin)
+    }
+    
+    Ok(Json.toJson(playerAirlinesJson ++ botAirlinesJson)).withHeaders(
       ACCESS_CONTROL_ALLOW_ORIGIN -> "http://localhost:9000",
       "Access-Control-Allow-Credentials" -> "true"
     )
@@ -777,7 +793,6 @@ class AirlineApplication @Inject()(cc: ControllerComponents) extends AbstractCon
   def getFleet(airlineId : Int) = Action { request =>
     var result = Json.arr()
     AirplaneSource.loadAirplanesByOwner(airlineId)
-      .filter(_.owner.airlineType != AirlineType.NON_PLAYER)
       .groupBy(_.model).toList
       .sortBy(_._1.name).foreach {
         case(model, airplanes) => result = result.append(Json.obj("name" -> model.name, "quantity" -> airplanes.size))

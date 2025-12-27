@@ -967,12 +967,53 @@ AIRLINE_COUNTRY_MAP = {
     'Vietnam Airlines': 'VN',
 }
 
+# Mapping of airline names to IATA-like codes (2 characters)
+AIRLINE_CODE_MAP = {
+    'Aeroflot': 'SU',
+    'Aeromexico': 'AM',
+    'Aeroméxico': 'AM',
+    'Air Canada': 'AC',
+    'Air China': 'CA',
+    'Air France': 'AF',
+    'Air India': 'AI',
+    'American Airlines': 'AA',
+    'American Supersonic': 'AS',
+    'Capital Airways': 'CW',
+    'Egyptair': 'MS',
+    'EuroWings': 'EW',
+    'Garuda Indonesia': 'GA',
+    'Japan Airlines': 'JL',
+    'Kiwi Air': 'KA',
+    'LATAM Brasil': 'LA',
+    'MediFlight': 'MF',
+    'Mineral Express': 'MX',
+    'Ocean Freight': 'OF',
+    'Pacific Island': 'PI',
+    'Petroleum Air': 'PA',
+    'Qantas': 'QF',
+    'Scandinavian Airlines': 'SK',
+    'TechConnect': 'TC',
+    'Turkish Airlines': 'TK',
+    'Vietnam Airlines': 'VN',
+}
+
 def get_country_for_airline(name):
     """Get country code for an airline based on its name"""
     for airline_prefix, country_code in AIRLINE_COUNTRY_MAP.items():
         if airline_prefix.lower() in name.lower():
             return country_code
     return None
+
+def get_airline_code(name):
+    """Get IATA-like code for an airline based on its name"""
+    for airline_prefix, code in AIRLINE_CODE_MAP.items():
+        if airline_prefix.lower() in name.lower():
+            return code
+    # Generate a 2-char code from the name
+    words = name.replace('[bot]', '').strip().split()
+    if len(words) >= 2:
+        return (words[0][0] + words[1][0]).upper()
+    return name[:2].upper()
 
 @app.route('/api/admin/reset-bots', methods=['POST'])
 def reset_bots():
@@ -1013,17 +1054,18 @@ def reset_bots():
         current_cycle = cycle_result['current_cycle'] if cycle_result and cycle_result['current_cycle'] else 0
         
         # Get cheap airplane models (price < 40,000,000)
-        cursor.execute("SELECT id, name, price FROM airplane_model WHERE price < 40000000 ORDER BY price")
+        cursor.execute("SELECT id, name, price, capacity FROM airplane_model WHERE price < 40000000 ORDER BY price")
         cheap_models = cursor.fetchall()
         
         for bot in bots:
             bot_id = bot['id']
             bot_name = bot['name']
-            country_code = bot['country_code']
             
-            # If no country code, try to infer from name
+            # Always try to infer country code from name first (more accurate)
+            country_code = get_country_for_airline(bot_name)
+            # Fall back to database value if we couldn't infer
             if not country_code:
-                country_code = get_country_for_airline(bot_name)
+                country_code = bot['country_code']
             
             # Delete link assignments first (foreign key)
             cursor.execute("DELETE FROM link_assignment WHERE link IN (SELECT id FROM link WHERE airline = %s)", (bot_id,))
@@ -1049,19 +1091,20 @@ def reset_bots():
             # Delete airline appeal (loyalty/awareness)
             cursor.execute("DELETE FROM airline_appeal WHERE airline = %s", (bot_id,))
             
-            # Reset balance to 200,000, reputation to 0, and update country_code if we have one
+            # Reset balance to 200,000, reputation to 0, and update country_code and airline_code
+            airline_code = get_airline_code(bot_name)
             if country_code:
                 cursor.execute("""
                     UPDATE airline_info 
-                    SET balance = '200000', reputation = 0, service_quality = 50.00, country_code = %s
+                    SET balance = '10000000', reputation = 0, service_quality = 50.00, country_code = %s, airline_code = %s
                     WHERE airline = %s
-                """, (country_code, bot_id))
+                """, (country_code, airline_code, bot_id))
             else:
                 cursor.execute("""
                     UPDATE airline_info 
-                    SET balance = '200000', reputation = 0, service_quality = 50.00
+                    SET balance = '10000000', reputation = 0, service_quality = 50.00, airline_code = %s
                     WHERE airline = %s
-                """, (bot_id,))
+                """, (airline_code, bot_id))
             
             # Find the largest airport in the bot's country for HQ
             hq_airport = None
@@ -1084,23 +1127,52 @@ def reset_bots():
                 """, (hq_airport, bot_id, current_cycle, country_code))
                 hqs_created += 1
             
-            # Add 5 random cheap airplanes
+            # Add 5 random cheap airplanes with configurations
             if cheap_models:
                 selected_models = random.sample(cheap_models, min(5, len(cheap_models)))
                 for model in selected_models:
+                    # Insert the airplane
                     cursor.execute("""
                         INSERT INTO airplane (model, owner, constructed_cycle, purchased_cycle, 
                                              airplane_condition, depreciation_rate, value, is_sold, 
                                              dealer_ratio, home, purchase_rate, version)
                         VALUES (%s, %s, %s, %s, 100.0, 0, %s, 0, 1.0, %s, 1.0, 0)
                     """, (model['id'], bot_id, current_cycle, current_cycle, model['price'], hq_airport))
+                    airplane_id = cursor.lastrowid
+                    
+                    # Create a configuration template for this airline/model (all economy)
+                    # First check if one exists
+                    cursor.execute("""
+                        SELECT id FROM airplane_configuration_template 
+                        WHERE airline = %s AND model = %s
+                        LIMIT 1
+                    """, (bot_id, model['id']))
+                    config_template = cursor.fetchone()
+                    
+                    if not config_template:
+                        # Create a new all-economy configuration
+                        cursor.execute("""
+                            INSERT INTO airplane_configuration_template (airline, model, economy, business, first, is_default)
+                            VALUES (%s, %s, %s, 0, 0, 1)
+                        """, (bot_id, model['id'], model['capacity']))
+                        config_id = cursor.lastrowid
+                    else:
+                        config_id = config_template['id']
+                    
+                    # Link the airplane to its configuration
+                    cursor.execute("""
+                        INSERT INTO airplane_configuration (airplane, configuration)
+                        VALUES (%s, %s)
+                        ON DUPLICATE KEY UPDATE configuration = %s
+                    """, (airplane_id, config_id, config_id))
+                    
                     aircraft_added += 1
         
         conn.commit()
         
         return jsonify({
             'success': True,
-            'message': f'Reset {len(bots)} bot airlines. Deleted {routes_deleted} routes, {aircraft_deleted} aircraft, {bases_deleted} bases. Created {hqs_created} HQs. Added {aircraft_added} new aircraft. Balance reset to $200,000, reputation to 0.',
+            'message': f'Reset {len(bots)} bot airlines. Deleted {routes_deleted} routes, {aircraft_deleted} aircraft, {bases_deleted} bases. Created {hqs_created} HQs. Added {aircraft_added} new aircraft. Balance reset to $10,000,000, reputation to 0.',
             'bots_reset': bot_names
         })
         
@@ -1160,7 +1232,7 @@ def reset_single_bot(bot_id):
         current_cycle = cycle_result['current_cycle'] if cycle_result and cycle_result['current_cycle'] else 0
         
         # Get cheap airplane models (price < 40,000,000)
-        cursor.execute("SELECT id, name, price FROM airplane_model WHERE price < 40000000 ORDER BY price")
+        cursor.execute("SELECT id, name, price, capacity FROM airplane_model WHERE price < 40000000 ORDER BY price")
         cheap_models = cursor.fetchall()
         
         # Delete link assignments first (foreign key)
@@ -1191,13 +1263,13 @@ def reset_single_bot(bot_id):
         if country_code:
             cursor.execute("""
                 UPDATE airline_info 
-                SET balance = '200000', reputation = 0, service_quality = 50.00, country_code = %s
+                SET balance = '10000000', reputation = 0, service_quality = 50.00, country_code = %s
                 WHERE airline = %s
             """, (country_code, bot_id))
         else:
             cursor.execute("""
                 UPDATE airline_info 
-                SET balance = '200000', reputation = 0, service_quality = 50.00
+                SET balance = '10000000', reputation = 0, service_quality = 50.00
                 WHERE airline = %s
             """, (bot_id,))
         
@@ -1238,7 +1310,7 @@ def reset_single_bot(bot_id):
         
         return jsonify({
             'success': True,
-            'message': f'Reset bot airline {bot["name"]}. Deleted {routes_deleted} routes, {aircraft_deleted} aircraft, {bases_deleted} bases. Created new HQ. Added {aircraft_added} new aircraft. Balance reset to $200,000, reputation to 0.'
+            'message': f'Reset bot airline {bot["name"]}. Deleted {routes_deleted} routes, {aircraft_deleted} aircraft, {bases_deleted} bases. Created new HQ. Added {aircraft_added} new aircraft. Balance reset to $10,000,000, reputation to 0.'
         })
         
     except Exception as e:
@@ -1314,7 +1386,7 @@ def create_bot():
         """, (hq_airport, airline_id, current_cycle, country_code))
         
         # Get cheap airplane models and add 5 random ones
-        cursor.execute("SELECT id, name, price FROM airplane_model WHERE price < 40000000 ORDER BY price")
+        cursor.execute("SELECT id, name, price, capacity FROM airplane_model WHERE price < 40000000 ORDER BY price")
         cheap_models = cursor.fetchall()
         
         aircraft_added = 0

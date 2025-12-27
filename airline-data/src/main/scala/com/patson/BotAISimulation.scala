@@ -24,8 +24,8 @@ import scala.util.Random
  */
 object BotAISimulation {
   
-  val ROUTE_PLANNING_PROBABILITY = 0.20 // 20% chance per cycle to plan new routes
-  val AIRPLANE_PURCHASE_PROBABILITY = 0.20 // 20% chance per cycle to buy planes
+  val ROUTE_PLANNING_PROBABILITY = 0.80 // 80% chance per cycle to plan new routes (was 20%)
+  val AIRPLANE_PURCHASE_PROBABILITY = 0.50 // 50% chance per cycle to buy planes (was 20%)
   val ROUTE_OPTIMIZATION_PROBABILITY = 0.35 // 35% chance to optimize existing routes (increased - this handles pricing!)
   val COMPETITION_RESPONSE_PROBABILITY = 0.30 // 30% chance to respond to competition
   val ROUTE_ABANDONMENT_PROBABILITY = 0.15 // 15% chance to evaluate route abandonment
@@ -153,20 +153,22 @@ object BotAISimulation {
     val existingDestinations = existingLinks.flatMap(link => List(link.from.id, link.to.id)).toSet
     
     // Get available cash for route expansion
-    val availableCash = airline.getBalance() * 0.1 // Use 10% of cash for expansion
-    if (availableCash < 5000000) {
-      println(s"[${airline.name}] Insufficient funds for expansion (need $$5M)")
+    val availableCash = airline.getBalance() * 0.5 // Use 50% of cash for expansion
+    if (availableCash < 50000) {
+      println(s"[${airline.name}] Insufficient funds for expansion (need $$50k, have $$${airline.getBalance()})")
       return
     }
     
     // Get available airplanes
     val allAirplanes = AirplaneSource.loadAirplanesByOwner(airline.id)
+    println(s"[${airline.name}] Total airplanes: ${allAirplanes.size}")
     val assignedAirplanes = LinkSource.loadFlightLinksByAirlineId(airline.id)
       .flatMap(_.getAssignedAirplanes().keys)
       .toSet
     val availableAirplanes = allAirplanes.filter(a => 
       !assignedAirplanes.contains(a) && a.isReady
     )
+    println(s"[${airline.name}] Available airplanes: ${availableAirplanes.size} (assigned: ${assignedAirplanes.size}, not ready: ${allAirplanes.count(!_.isReady)})")
     
     if (availableAirplanes.isEmpty) {
       println(s"[${airline.name}] No available aircraft for new routes")
@@ -176,6 +178,7 @@ object BotAISimulation {
     var routesCreated = 0
     
     bases.foreach { base =>
+      println(s"[${airline.name}] Processing base: ${base.airport.name} (${base.airport.iata})")
       if (routesCreated >= MAX_ROUTES_PER_CYCLE) return
       
       // Find routes with HIGH DEMAND
@@ -188,6 +191,8 @@ object BotAISimulation {
         allAirports,
         countryRelationships
       )
+      
+      println(s"[${airline.name}] Found ${potentialDestinations.size} potential destinations from ${base.airport.iata}")
       
       potentialDestinations.foreach { case (destination, estimatedDemand, competitorCount) =>
         if (routesCreated < MAX_ROUTES_PER_CYCLE) {
@@ -505,7 +510,7 @@ object BotAISimulation {
     println(s"[${airline.name}] Considering airplane purchases (${personality})")
     
     val availableCash = airline.getBalance() * personality.fleetBudgetRatio
-    if (availableCash < 5000000) return // Need at least $5M
+    if (availableCash < 50000) return // Need at least $50k for airplane purchases
     
     val currentFleet = AirplaneSource.loadAirplanesByOwner(airline.id)
     val avgAge = if (currentFleet.nonEmpty) {
