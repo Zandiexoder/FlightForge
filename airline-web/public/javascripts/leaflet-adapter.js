@@ -5,7 +5,7 @@
  * It wraps Leaflet functionality to mimic some Google Maps API patterns.
  */
 
-console.log('Leaflet Adapter v3.7 loaded - Smart viewport-based world wrapping (performance optimized)');
+console.log('Leaflet Adapter v3.8 loaded - Added marker.setTitle/getTitle and title property for Google Maps compatibility');
 
 // Geometry helper functions (replaces google.maps.geometry.spherical)
 const LeafletGeometry = {
@@ -644,6 +644,34 @@ if (typeof google.maps === 'undefined') {
                     return marker;
                 };
                 
+                // setTitle method for Google Maps compatibility
+                marker.setTitle = function(title) {
+                    marker.options.title = title;
+                    marker._title = title;  // Also store as direct property
+                    if (marker._icon) {
+                        marker._icon.title = title;
+                    }
+                    return marker;
+                };
+                
+                // getTitle method for Google Maps compatibility
+                marker.getTitle = function() {
+                    return marker.options.title;
+                };
+                
+                // Add direct title property for Google Maps compatibility
+                marker._title = options.title || '';
+                Object.defineProperty(marker, 'title', {
+                    get: function() { return marker._title; },
+                    set: function(val) { 
+                        marker._title = val;
+                        marker.options.title = val;
+                        if (marker._icon) {
+                            marker._icon.title = val;
+                        }
+                    }
+                });
+                
                 // Copy all custom properties from options to marker
                 // This preserves properties like airport, airportName, championIcon, etc.
                 for (var key in options) {
@@ -652,10 +680,6 @@ if (typeof google.maps === 'undefined') {
                         marker[key] = options[key];
                     }
                 }
-                
-                                console.log('✅ Marker created with custom properties:', 
-                    'airport:', marker.airport ? marker.airport.name : 'none',
-                    'isBase:', marker.isBase);
                 
                 // Store original position for world wrapping
                 marker._originalLng = latlng.lng;

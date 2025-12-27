@@ -21,7 +21,7 @@ class AccountApplication @Inject()(cc: ControllerComponents) extends AbstractCon
     if (configFactory.hasPath("server.email")) {
       configFactory.getString("server.email")
     } else {
-      "info@airline-club.com"
+      "info@flightforge.app"
     }
 
   /**
@@ -121,11 +121,6 @@ class AccountApplication @Inject()(cc: ControllerComponents) extends AbstractCon
     Ok(html.forgotPassword(forgotPasswordForm.fill(ForgotPassword("", ""))))
   }
   
-//  def sendEmail() = Action {
-//    EmailUtil.sendEmail("patson_luk@hotmail.com", "info@airline-club.com", "testing", "testing");
-//    Ok(Json.obj())
-//  }
-  
   
   
   /**
@@ -169,7 +164,7 @@ class AccountApplication @Inject()(cc: ControllerComponents) extends AbstractCon
           val users = UserSource.loadUsersByCriteria(List(("email", userInput.email)))
           if (users.size > 0) {
             println("Sending email for forgot ID " + users)
-            EmailUtil.sendEmail(userInput.email, fromEmail, "Forgot User Name from airline-club.com", getForgotIdMessage(users))
+            EmailUtil.sendEmail(userInput.email, fromEmail, "Forgot User Name from FlightForge", getForgotIdMessage(users))
           } else {
             println("Sending email for forgot ID but email " + userInput.email + " has no account!")
           }
@@ -196,7 +191,7 @@ class AccountApplication @Inject()(cc: ControllerComponents) extends AbstractCon
             }
 
             val baseUrl = s"$scheme$host/password-reset"
-            EmailUtil.sendEmail(user.email, fromEmail, "Reset password for airline-club.com", getResetPasswordMessage(user, baseUrl))
+            EmailUtil.sendEmail(user.email, fromEmail, "Reset password for FlightForge", getResetPasswordMessage(user, baseUrl))
           } else {
             println("Want to reset password for " + user.userName + " but email does not match!")
           }

@@ -1140,10 +1140,10 @@ function addContestedMarker(airportMarker) {
         icon: { anchor: new google.maps.Point(-5,15), url: "assets/images/icons/fire.png" },
         zIndex: 500
       });
-    //marker.setVisible(isShowMarker(airportMarker, zoom))
-    contestedMarker.bindTo("visible", airportMarker)
-    contestedMarker.setZIndex(airportMarker.getZIndex() + 1)
-    contestedMarkers.push(contestedMarker)
+    // Sync visibility with airportMarker (replaces Google Maps bindTo)
+    contestedMarker.setVisible(airportMarker.getVisible ? airportMarker.getVisible() : true);
+    contestedMarker.setZIndex(airportMarker.getZIndex ? airportMarker.getZIndex() + 1 : 501);
+    contestedMarkers.push(contestedMarker);
 }
 
 

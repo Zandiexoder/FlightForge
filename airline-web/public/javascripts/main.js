@@ -366,37 +366,81 @@ function updateLeafletTileLayer(mapType) {
 		map.removeLayer(map.tileLayer);
 	}
 	
-	var tileUrl, attribution;
+	var tileUrl, attribution, subdomains = ['a', 'b', 'c'];
 	
-	switch(mapType) {
-		case 'satellite':
-			tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-			attribution = '&copy; <a href="https://www.esri.com/">Esri</a>';
-			break;
-		case 'dark':
-			tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-			attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
-			break;
-		case 'light':
-			tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-			attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
-			break;
-		case 'roadmap':
-		default:
-			tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-			attribution = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
-			break;
-	}
+	// Map type configurations
+	var mapConfigs = {
+		'roadmap': {
+			url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+			attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+		},
+		'satellite': {
+			url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+			attribution: '&copy; <a href="https://www.esri.com/">Esri</a>, Maxar, Earthstar Geographics',
+			subdomains: [],
+			labels: 'https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'
+		},
+		'dark': {
+			url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+			attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+		},
+		'light': {
+			url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+			attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+		},
+		'voyager': {
+			url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
+			attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+		},
+		'stadia-smooth': {
+			url: 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png',
+			attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+			subdomains: []
+		},
+		'thunderforest-landscape': {
+			url: 'https://{s}.tile.thunderforest.com/landscape/{z}/{x}/{y}.png?apikey=6170aad10dfd42a38d4d8c709a536f38',
+			attribution: '&copy; <a href="https://www.thunderforest.com/">Thunderforest</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+		},
+		'thunderforest-neighbourhood': {
+			url: 'https://{s}.tile.thunderforest.com/neighbourhood/{z}/{x}/{y}.png?apikey=6170aad10dfd42a38d4d8c709a536f38',
+			attribution: '&copy; <a href="https://www.thunderforest.com/">Thunderforest</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+		},
+		'jawg-terrain': {
+			url: 'https://tiles.stadiamaps.com/tiles/stamen_terrain/{z}/{x}/{y}{r}.png',
+			attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a href="https://stamen.com/">Stamen Design</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+			subdomains: []
+		}
+	};
 	
-	map.tileLayer = L.tileLayer(tileUrl, {
-		attribution: attribution,
+	var config = mapConfigs[mapType] || mapConfigs['roadmap'];
+	
+	map.tileLayer = L.tileLayer(config.url, {
+		attribution: config.attribution,
 		maxZoom: 19,
-		subdomains: ['a', 'b', 'c'],
+		subdomains: config.subdomains !== undefined ? config.subdomains : ['a', 'b', 'c'],
 		noWrap: false  // Enable tile wrapping for continuous world
 	});
 	
 	map.tileLayer.addTo(map);
+	
+	// Remove existing labels layer if present
+	if (map.labelsLayer) {
+		map.removeLayer(map.labelsLayer);
+		map.labelsLayer = null;
+	}
+	
+	// Add labels overlay for satellite view
+	if (config.labels) {
+		map.labelsLayer = L.tileLayer(config.labels, {
+			maxZoom: 19,
+			subdomains: [],
+			noWrap: false
+		});
+		map.labelsLayer.addTo(map);
+	}
+	
 	map.currentMapType = mapType;
+	$.cookie('currentMapTypes', mapType);
 }
 
 function addCustomMapControls(map) {
@@ -415,10 +459,36 @@ function addCustomMapControls(map) {
     `)
 
   toggleAllianceBaseMapViewButton.index = 0
-  toggleMapLightButton.index = 1
-  toggleMapAnimationButton.index = 2
-  toggleChampionButton.index = 3
-  toggleMapChristmasButton.index = 5
+  toggleMapAnimationButton.index = 1
+  toggleChampionButton.index = 2
+  toggleMapChristmasButton.index = 3
+
+  // Create map style selector dropdown
+  var mapStyleSelector = $(`
+    <div id="mapStyleSelector" class="map-style-selector">
+      <select id="mapStyleDropdown" onchange="changeMapStyle(this.value)">
+        <optgroup label="Standard">
+          <option value="roadmap">🗺️ OpenStreetMap</option>
+          <option value="voyager">🚗 Voyager</option>
+          <option value="light">☀️ Light</option>
+          <option value="dark">🌙 Dark</option>
+        </optgroup>
+        <optgroup label="Terrain">
+          <option value="stadia-smooth">🌊 Stadia Smooth</option>
+          <option value="thunderforest-landscape">🏔️ Landscape</option>
+          <option value="thunderforest-neighbourhood">🏘️ Neighbourhood</option>
+          <option value="jawg-terrain">🗻 Stamen Terrain</option>
+        </optgroup>
+        <optgroup label="Imagery">
+          <option value="satellite">🛰️ Satellite</option>
+        </optgroup>
+      </select>
+    </div>
+  `);
+  
+  // Set initial value from cookie
+  var savedMapType = $.cookie('currentMapTypes') || 'roadmap';
+  mapStyleSelector.find('select').val(savedMapType);
 
   // Create Leaflet custom control
   var controlPosition = $("#map").height() > 500 ? 'bottomright' : 'bottomleft';
@@ -431,9 +501,10 @@ function addCustomMapControls(map) {
     onAdd: function(map) {
       var container = L.DomUtil.create('div', 'leaflet-custom-controls');
       
-      // Add controls in order
-      $(container).append(toggleAllianceBaseMapViewButton[0]);
-      $(container).append(toggleMapLightButton[0]);
+      // Add map style selector first
+      $(container).append(mapStyleSelector[0]);
+      
+      // Add controls in order (removed alliance button and lightswitch)
       $(container).append(toggleMapAnimationButton[0]);
       $(container).append(toggleChampionButton[0]);
       
@@ -451,6 +522,18 @@ function addCustomMapControls(map) {
   
   map.customControls = new CustomControl();
   map.customControls.addTo(map);
+}
+
+// Function to change map style from dropdown
+function changeMapStyle(mapType) {
+  updateLeafletTileLayer(mapType);
+  if (mapType === 'dark') {
+    currentStyles = 'dark';
+  } else {
+    currentStyles = 'light';
+  }
+  $.cookie('currentMapStyles', currentStyles);
+  refreshLinks(false);
 }
 
 function addAirlineSpecificMapControls(map) {
