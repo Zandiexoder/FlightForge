@@ -107,7 +107,7 @@ This repo includes a production-ready compose file for Coolify: `docker-compose.
 - `SECRET_KEY` (**required**)
 - `DATABASE_URL` (optional, defaults to a persistent SQLite file)
 - `CORS_ORIGINS` (optional, JSON array string, e.g. `["https://flightforge.yourdomain.com"]`)
-- `BACKEND_URL` (optional, defaults to `http://backend:8000`)
+- `BACKEND_URL` (optional, defaults to `http://backend:8000`; if you set it manually, both `backend:8000` and `http://backend:8000` are accepted)
 
 ### 3) Configure domains in Coolify
 - Map your main app domain to the `frontend` service on port `80`
