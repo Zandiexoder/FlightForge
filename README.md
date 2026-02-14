@@ -118,6 +118,13 @@ This repo includes a production-ready compose file for Coolify: `docker-compose.
 - Nginx proxies `/api/*` and `/ws/*` to the backend service
 - SQLite DB is persisted in the `backend-data` volume shared by backend/admin
 
+### Common Coolify Pitfall
+If deployment logs show `failed to read dockerfile: open Dockerfile: no such file or directory`, your app is configured as a **Dockerfile app** instead of a **Docker Compose app**.
+
+Use one of these modes:
+- **Full stack (recommended):** Create a Docker Compose resource and set compose path to `docker-compose.coolify.yaml`.
+- **Frontend-only:** Use root `Dockerfile` (added in this repo) and point `BACKEND_URL` to your backend service URL.
+
 ## Project Structure
 
 ```
